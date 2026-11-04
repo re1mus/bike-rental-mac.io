@@ -361,29 +361,36 @@ function rFin() {
 
 // ОБРАБОТЧИКИ
 async function bind() {
-
     if ($("m_add")) $("m_add").onclick = async function() {
-        var n = v("m_n"), h = v("m_h"), d = v("m_d"), t = v("m_t");
-        if (!n) return;
 
-        var res = await clientDB.from("models").insert([
-            {name:n, hour:h, day:d, note:t}
-        ]);
+    var n = v("m_n");
+    var h = v("m_h");
+    var d = v("m_d");
+    var t = v("m_t");
 
-        if (res.error) return alert(res.error.message);
-        loadData();
-    };
+    if (!n) {
+        alert("Введите название модели");
+        return;
+    }
 
-    if ($("c_add")) $("c_add").onclick = async function() {
-        var n = v("c_n"), p = v("c_p"), d = v("c_d"), pd = $("c_pd").checked;
-        if (!n) return;
+    var res = await clientDB
+        .from("models")
+        .insert([{
+            name: n,
+            hour: h === "" ? null : Number(h),
+            day: d === "" ? null : Number(d),
+            note: t
+        }]);
 
-        var res = await clientDB.from("clients").insert([
-            {name:n, phone:p, passport:d, pd:pd}
-        ]);
+    if (res.error) {
+        alert("Ошибка добавления: " + res.error.message);
+        return;
+    }
 
-        if (res.error) return alert(res.error.message);
-        loadData();
+    alert("Модель успешно добавлена!");
+
+    loadData();
+};
     };
 
     if ($("r_add")) $("r_add").onclick = async function() {
