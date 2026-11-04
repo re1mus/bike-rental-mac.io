@@ -39,10 +39,10 @@ th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--bd);font-siz
 </div>
 <script>    
 (function(){
-const URL_DB = 'https://supabase.co'; 
-const KEY_DB = 'sb_publishable_Wc044t0uBww39WgLtiSGYd_aXFba_CP';
+var URL_DB = 'https://supabase.co'; 
+var KEY_DB = 'sb_publishable_Wc044t0uBww39WgLtiSGYd_aXFba_CP';
 
-const clientDB = window.supabase.createClient(URL_DB, KEY_DB);
+var clientDB = window.supabase.createClient(URL_DB, KEY_DB);
 var S = {models:[], clients:[], rentals:[], fin:[]}, tab = "models";
 var TABS = [["models","Каталог"],["clients","Клиенты"],["rentals","Прокаты"],["fin","Финансы"]];
 
@@ -55,12 +55,11 @@ function v(id){var e=$(id);return e?e.value.trim():""}
 async function loadData() {
     try {
         if($("status")) $("status").textContent = "Загрузка актуальных данных...";
-        const [mRes, cRes, rRes, fRes] = await Promise.all([
-            clientDB.from('models').select('*').order('id', { ascending: false }),
-            clientDB.from('clients').select('*').order('id', { ascending: false }),
-            clientDB.from('rentals').select('*').order('id', { ascending: false }),
-            clientDB.from('fin').select('*').order('id', { ascending: false })
-        ]);
+        var mRes = await clientDB.from('models').select('*').order('id', { ascending: false });
+        var cRes = await clientDB.from('clients').select('*').order('id', { ascending: false });
+        var rRes = await clientDB.from('rentals').select('*').order('id', { ascending: false });
+        var fRes = await clientDB.from('fin').select('*').order('id', { ascending: false });
+        
         S.models = mRes.data || [];
         S.clients = cRes.data || [];
         S.rentals = rRes.data || [];
@@ -74,7 +73,7 @@ async function loadData() {
 
 function subscribeRealtime() {
     clientDB.channel('schema-db-changes')
-        .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+        .on('postgres_changes', { event: '*', schema: 'public' }, function() {
             loadData();
         })
         .subscribe();
@@ -148,7 +147,7 @@ async function bind(){
   b.onclick=async function(){
    if(!confirm("Удалить запись безвозвратно?"))return;
    var p=b.dataset.del.split(":");
-   await clientDB.from(p).delete().eq('id', p);
+   await clientDB.from(p[0]).delete().eq('id', Number(p[1]));
    loadData();
   }
  });
