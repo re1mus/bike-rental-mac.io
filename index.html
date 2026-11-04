@@ -39,10 +39,10 @@ th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--bd);font-siz
 </div>
 <script>
 (function(){
-const SUPABASE_URL = 'https://yqjiklwvaqqkhsvhaxqg.supabase.co'; 
-const SUPABASE_KEY = 'sb_publishable_WcO44t0u8ww39WgltISGyQ_aXFba_CP';
+const URL_DB = 'https://yqjiklwvaqqkhsvhaxqg.supabase.co'; 
+const KEY_DB = 'sb_publishable_WcO44t0u8ww39WgltISGyQ_aXFba_CP';
 
-const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const clientDB = window.supabase.createClient(URL_DB, KEY_DB);
 var S = {models:[], clients:[], rentals:[], fin:[]}, tab = "models";
 var TABS = [["models","Каталог"],["clients","Клиенты"],["rentals","Прокаты"],["fin","Финансы"]];
 
@@ -56,10 +56,10 @@ async function loadData() {
     try {
         if($("status")) $("status").textContent = "Загрузка актуальных данных...";
         const [mRes, cRes, rRes, fRes] = await Promise.all([
-            db.from('models').select('*').order('id', { ascending: false }),
-            db.from('clients').select('*').order('id', { ascending: false }),
-            db.from('rentals').select('*').order('id', { ascending: false }),
-            db.from('fin').select('*').order('id', { ascending: false })
+            clientDB.from('models').select('*').order('id', { ascending: false }),
+            clientDB.from('clients').select('*').order('id', { ascending: false }),
+            clientDB.from('rentals').select('*').order('id', { ascending: false }),
+            clientDB.from('fin').select('*').order('id', { ascending: false })
         ]);
         S.models = mRes.data || [];
         S.clients = cRes.data || [];
@@ -73,7 +73,7 @@ async function loadData() {
 }
 
 function subscribeRealtime() {
-    db.channel('schema-db-changes')
+    clientDB.channel('schema-db-changes')
         .on('postgres_changes', { event: '*', schema: 'public' }, () => {
             loadData();
         })
@@ -92,7 +92,7 @@ function render(){renderTabs();var f={models:rModels,clients:rClients,rentals:rR
 
 function rModels(){
  var h='<div class="card"><div class="grid"><div><label>Модель</label><input id="m_n"></div><div><label>Цена за час, ₽</label><input id="m_h" type="number"></div><div><label>Цена за день, ₽</label><input id="m_d" type="number"></div><div><label>Заметка</label><input id="m_t"></div></div><button class="b" id="m_add">Добавить модель</button></div>';
- h+='<div class="card scroll"><table><tr><th>Модель</th><th>За час</th><th>За день</th><th>Заметка</th><th></th></tr>';
+ h+='<div class="card scroll"><table><tr><th>Model</th><th>За час</th><th>За день</th><th>Заметка</th><th></th></tr>';
  S.models.forEach(function(m){h+='<tr><td>'+esc(m.name)+'</td><td>'+money(m.hour)+'</td><td>'+money(m.day)+'</td><td class="mu">'+esc(m.note)+'</td><td><button class="x" data-del="models:'+m.id+'">Удалить</button></td></tr>'});
  if(!S.models.length)h+='<tr><td colspan="5" class="mu">Моделей пока нет</td></tr>';
  return h+'</table></div>'}
@@ -125,30 +125,30 @@ function rFin(){
 async function bind(){
  if($("m_add"))$("m_add").onclick=async function(){
   var n=v("m_n"),h=v("m_h"),d=v("m_d"),t=v("m_t");if(!n)return;
-  await db.from('models').insert([{name:n,hour:h,day:d,note:t}]);
+  await clientDB.from('models').insert([{name:n,hour:h,day:d,note:t}]);
   loadData();
  };
  if($("c_add"))$("c_add").onclick=async function(){
   var n=v("c_n"),p=v("c_p"),d=v("c_d"),pd=$("c_pd").checked;if(!n)return;
-  await db.from('clients').insert([{name:n,phone:p,passport:d,pd:pd}]);
+  await clientDB.from('clients').insert([{name:n,phone:p,passport:d,pd:pd}]);
   loadData();
  };
  if($("r_add"))$("r_add").onclick=async function(){
   var c=v("r_c"),m=v("r_m"),dt=v("r_dt"),k=v("r_k"),a=v("r_a"),ins=$("r_i").checked,f=$("r_f").checked;if(!c||!m)return;
-  await db.from('rentals').insert([{client_id:c,model_id:m,date:dt,days:k,amount:a,insured:ins}]);
-  if(f){await db.from('fin').insert([{type:"in",amount:a,note:"Прокат: "+name(S.models,m,"name")+" ("+name(S.clients,c,"name")+")",date:dt}]);}
+  await clientDB.from('rentals').insert([{client_id:c,model_id:m,date:dt,days:k,amount:a,insured:ins}]);
+  if(f){await clientDB.from('fin').insert([{type:"in",amount:a,note:"Прокат: "+name(S.models,m,"name")+" ("+name(S.clients,c,"name")+")",date:dt}]);}
   loadData();
  };
  if($("f_add"))$("f_add").onclick=async function(){
   var t=v("f_t"),a=v("f_a"),m=v("f_m"),d=v("f_d");if(!a)return;
-  await db.from('fin').insert([{type:t,amount:a,note:m,date:d}]);
+  await clientDB.from('fin').insert([{type:t,amount:a,note:m,date:d}]);
   loadData();
  };
  Array.prototype.forEach.call(document.querySelectorAll("[data-del]"),function(b){
   b.onclick=async function(){
    if(!confirm("Удалить запись безвозвратно?"))return;
    var p=b.dataset.del.split(":");
-   await db.from(p[0]).delete().eq('id', p[1]);
+   await clientDB.from(p).delete().eq('id', p[1]);
    loadData();
   }
  });
