@@ -42,7 +42,7 @@ th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--bd);font-siz
 var URL_DB = 'https://supabase.co'; 
 var KEY_DB = 'sb_publishable_Wc044t0uBww39WgLtiSGYd_aXFba_CP';
 
-var clientDB = window.supabase.createClient(URL_DB, KEY_DB);
+var clientDB = null;
 var S = {models:[], clients:[], rentals:[], fin:[]}, tab = "models";
 var TABS = [["models","Каталог"],["clients","Клиенты"],["rentals","Прокаты"],["fin","Финансы"]];
 
@@ -147,14 +147,27 @@ async function bind(){
   b.onclick=async function(){
    if(!confirm("Удалить запись безвозвратно?"))return;
    var p=b.dataset.del.split(":");
-   await clientDB.from(p[0]).delete().eq('id', Number(p[1]));
+   await clientDB.from(p).delete().eq('id', Number(p));
    loadData();
   }
  });
 }
 
-loadData();
-subscribeRealtime();
+function init() {
+    if (window.supabase && window.supabase.createClient) {
+        clientDB = window.supabase.createClient(URL_DB, KEY_DB);
+        loadData();
+        subscribeRealtime();
+    } else {
+        setTimeout(init, 100);
+    }
+}
+
+if (document.readyState === "complete" || document.readyState === "interactive") {
+    init();
+} else {
+    document.addEventListener("DOMContentLoaded", init);
+}
 })();
 </script>
 </body>
