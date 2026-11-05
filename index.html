@@ -39,465 +39,859 @@ th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--bd);font-siz
 </div>
 <script>    
 (function () {
-"use strict";
+  "use strict";
 
-// НАСТРОЙКИ SUPABASE
-var URL_DB = 'https://yqjiklwvaqqkhsvhaxqg.supabase.co';
-var KEY_DB = 'sb_publishable_WcO44t0u8ww39WgltISGyQ_aXFba_CP';
+  // НАСТРОЙКИ SUPABASE
+  var URL_DB = "https://yqjiklwvaqqkhsvhaxqg.supabase.co";
+  var KEY_DB = "sb_publishable_WcO44t0u8ww39WgltISGyQ_aXFba_CP";
 
-var clientDB = null;
+  var clientDB = null;
+  var realtimeChannel = null;
+  var isLoading = false;
 
-var S = {
-    models: [],
-    clients: [],
-    rentals: [],
-    fin: []
-};
+  var S = { models: [], clients: [], rentals: [], fin: [] };
+  var tab = "models";
 
-var tab = "models";
+  var TABS = [
+    ["models", "Каталог"],
+    ["clients", "Клиенты"],
+    ["rentals", "Прокаты"],
+    ["fin", "Финансы"]
+  ];
 
-var TABS = [
-    ["models","Каталог"],
-    ["clients","Клиенты"],
-    ["rentals","Прокаты"],
-    ["fin","Финансы"]
-];
-
-function esc(s) {
-    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c) {
-        return {
-            "&":"&amp;",
-            "<":"&lt;",
-            ">":"&gt;",
-            '"':"&quot;",
-            "'":"&#39;"
-        }[c];
-    });
-}
-
-function money(n) {
-    return Number(n || 0).toLocaleString("ru-RU") + " ₽";
-}
-
-function today() {
-    return new Date().toISOString().slice(0,10);
-}
-
-function $(id) {
+  function $(id) {
     return document.getElementById(id);
-}
+  }
 
-function v(id) {
-    var e = $(id);
-    return e ? e.value.trim() : "";
-}
+  function setStatus(message) {
+    var el = $("status");
+    if (el) el.textContent = message;
+  }
 
-// ЗАГРУЗКА SUPABASE БЕЗ БЕСКОНЕЧНОГО ЦИКЛА
-function loadSupabaseLibrary() {
-    return new Promise(function(resolve, reject) {
+  function value(id) {
+    var el = $(id);
+    return el ? String(el.value || "").trim() : "";
+  }
 
-        if (window.supabase && window.supabase.createClient) {
-            resolve();
-            return;
-        }
-
-        var script = document.createElement("script");
-
-        script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
-
-        script.onload = function() {
-            if (window.supabase && window.supabase.createClient) {
-                resolve();
-            } else {
-                reject(new Error("Supabase не удалось инициализировать"));
-            }
-        };
-
-        script.onerror = function() {
-            reject(new Error("Не удалось загрузить библиотеку Supabase"));
-        };
-
-        document.head.appendChild(script);
-
-        setTimeout(function() {
-            if (!window.supabase || !window.supabase.createClient) {
-                reject(new Error("Превышено время загрузки Supabase"));
-            }
-        }, 15000);
-
+  function esc(input) {
+    return String(input == null ? "" : input).replace(/[&<>"']/g, function (ch) {
+      return {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[ch];
     });
-}
+  }
 
-// ЗАГРУЗКА ДАННЫХ
-async function loadData() {
+  function money(amount) {
+    var n = Number(amount);
+    return (Number.isFinite(n) ? n : 0).toLocaleString("ru-RU") + " ₽";
+  }
+
+  function today() {
+    var d = new Date();
+    var month = String(d.getMonth() + 1).padStart(2, "0");
+    var day = String(d.getDate()).padStart(2, "0");
+    return d.getFullYear() + "-" + month + "-" + day;
+  }
+
+  function numberOrNull(raw, label) {
+    if (raw === "") return null;
+
+    var n = Number(raw);
+
+    if (!Number.isFinite(n)) {
+      throw new Error("Проверь поле «" + label + "».");
+    }
+
+    return n;
+  }
+
+  function requiredNumber(raw, label, minimum) {
+    if (raw === "") {
+      throw new Error("Заполни поле «" + label + "».");
+    }
+
+    var n = Number(raw);
+
+    if (!Number.isFinite(n) || n < minimum) {
+      throw new Error(
+        "В поле «" + label + "» должно быть число не меньше " + minimum + "."
+      );
+    }
+
+    return n;
+  }
+
+  function showDbError(action, error) {
+    console.error(action, error);
+
+    var message = error && error.message
+      ? error.message
+      : String(error || "Неизвестная ошибка");
+
+    alert(action + ": " + message);
+    setStatus("Ошибка: " + message);
+  }
+
+  // ПОДКЛЮЧЕНИЕ SUPABASE
+  function loadSupabaseLibrary() {
+    return new Promise(function (resolve, reject) {
+
+      if (
+        window.supabase &&
+        typeof window.supabase.createClient === "function"
+      ) {
+        resolve();
+        return;
+      }
+
+      var existing = document.querySelector(
+        'script[data-supabase-client="true"]'
+      );
+
+      var script = existing || document.createElement("script");
+      var finished = false;
+
+      var timer = setTimeout(function () {
+        finish(
+          new Error(
+            "Не удалось загрузить библиотеку Supabase за 15 секунд. Проверь интернет или CDN."
+          )
+        );
+      }, 15000);
+
+      function finish(error) {
+        if (finished) return;
+
+        finished = true;
+        clearTimeout(timer);
+
+        if (error) {
+          reject(error);
+        } else if (
+          window.supabase &&
+          typeof window.supabase.createClient === "function"
+        ) {
+          resolve();
+        } else {
+          reject(
+            new Error("Библиотека загрузилась, но window.supabase не найден.")
+          );
+        }
+      }
+
+      script.onload = function () {
+        finish(null);
+      };
+
+      script.onerror = function () {
+        finish(
+          new Error(
+            "CDN Supabase недоступен. Проверь подключение к интернету."
+          )
+        );
+      };
+
+      if (!existing) {
+        script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+        script.async = true;
+        script.setAttribute("data-supabase-client", "true");
+        document.head.appendChild(script);
+      }
+    });
+  }
+
+  // ЗАГРУЗКА ДАННЫХ
+  async function loadData() {
+
+    if (!clientDB || isLoading) return false;
+
+    isLoading = true;
+    setStatus("Загружаю данные из базы...");
+
     try {
 
-        $("status").textContent = "Загрузка актуальных данных...";
+      var results = await Promise.all([
+        clientDB.from("models").select("*").order("id", { ascending: false }),
+        clientDB.from("clients").select("*").order("id", { ascending: false }),
+        clientDB.from("rentals").select("*").order("id", { ascending: false }),
+        clientDB.from("fin").select("*").order("id", { ascending: false })
+      ]);
 
-        var results = await Promise.all([
-            clientDB.from("models").select("*").order("id", {ascending:false}),
-            clientDB.from("clients").select("*").order("id", {ascending:false}),
-            clientDB.from("rentals").select("*").order("id", {ascending:false}),
-            clientDB.from("fin").select("*").order("id", {ascending:false})
-        ]);
+      var tableNames = ["models", "clients", "rentals", "fin"];
 
-        results.forEach(function(result) {
-            if (result.error) throw result.error;
+      for (var i = 0; i < results.length; i++) {
+        if (results[i].error) {
+          throw new Error(
+            "Таблица " + tableNames[i] + ": " + results[i].error.message
+          );
+        }
+      }
+
+      S.models = results[0].data || [];
+      S.clients = results[1].data || [];
+      S.rentals = results[2].data || [];
+      S.fin = results[3].data || [];
+
+      render();
+
+      setStatus("Данные загружены и синхронизированы с Supabase.");
+
+      return true;
+
+    } catch (error) {
+
+      console.error("Ошибка загрузки данных:", error);
+
+      setStatus("Ошибка загрузки: " + (error.message || error));
+
+      return false;
+
+    } finally {
+
+      isLoading = false;
+
+    }
+  }
+
+  // REALTIME
+  function subscribeRealtime() {
+
+    if (!clientDB || realtimeChannel) return;
+
+    try {
+
+      realtimeChannel = clientDB
+        .channel("schema-db-changes")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public"
+          },
+          function () {
+            loadData();
+          }
+        )
+        .subscribe(function (status) {
+
+          if (status === "CHANNEL_ERROR") {
+            console.error(
+              "Supabase Realtime: ошибка подписки на изменения."
+            );
+          }
+
         });
 
-        S.models = results[0].data || [];
-        S.clients = results[1].data || [];
-        S.rentals = results[2].data || [];
-        S.fin = results[3].data || [];
+    } catch (error) {
 
-        $("status").textContent =
-            "Данные синхронизированы с облаком. Все устройства видят изменения.";
-
-        render();
-
-    } catch(e) {
-
-        console.error("Ошибка загрузки:", e);
-
-        $("status").textContent =
-            "Ошибка подключения к базе: " + e.message;
+      console.error("Не удалось включить Realtime:", error);
 
     }
-}
+  }
 
-// СИНХРОНИЗАЦИЯ
-function subscribeRealtime() {
-    clientDB.channel("schema-db-changes")
-        .on(
-            "postgres_changes",
-            {event:"*", schema:"public"},
-            function() {
-                loadData();
-            }
-        )
-        .subscribe();
-}
+  // ПОИСК ИМЕНИ
+  function findName(list, id, field) {
 
-// ИМЕНА
-function name(list, id, f) {
     for (var i = 0; i < list.length; i++) {
-        if (Number(list[i].id) === Number(id)) {
-            return list[i][f];
-        }
+
+      if (Number(list[i].id) === Number(id)) {
+        return list[i][field];
+      }
+
     }
+
     return "—";
-}
+  }
 
-// ВКЛАДКИ
-function renderTabs() {
-    var h = "";
+  // ВКЛАДКИ
+  function renderTabs() {
 
-    TABS.forEach(function(t) {
-        h += '<button class="tab' +
-            (tab === t[0] ? " on" : "") +
-            '" data-t="' + t[0] + '">' + t[1] + '</button>';
+    var html = "";
+
+    TABS.forEach(function (item) {
+
+      html +=
+        '<button class="tab' +
+        (tab === item[0] ? " on" : "") +
+        '" data-t="' +
+        item[0] +
+        '">' +
+        item[1] +
+        "</button>";
+
     });
 
-    $("tabs").innerHTML = h;
+    $("tabs").innerHTML = html;
 
     Array.prototype.forEach.call(
-        document.querySelectorAll(".tab"),
-        function(b) {
-            b.onclick = function() {
-                tab = b.dataset.t;
-                render();
-            };
-        }
-    );
-}
+      document.querySelectorAll(".tab"),
+      function (button) {
 
-function render() {
+        button.onclick = function () {
+          tab = button.dataset.t;
+          render();
+        };
+
+      }
+    );
+  }
+
+  // ОБНОВЛЕНИЕ ИНТЕРФЕЙСА
+  function render() {
+
     renderTabs();
 
-    var f = {
-        models:rModels,
-        clients:rClients,
-        rentals:rRentals,
-        fin:rFin
-    }[tab];
+    var views = {
+      models: renderModels,
+      clients: renderClients,
+      rentals: renderRentals,
+      fin: renderFinance
+    };
 
-    $("view").innerHTML = f();
+    $("view").innerHTML = views[tab]();
+
     bind();
-}
+  }
 
-// КАТАЛОГ
-function rModels() {
-    var h = '<div class="card"><div class="grid">' +
-        '<div><label>Модель</label><input id="m_n"></div>' +
-        '<div><label>Цена за час, ₽</label><input id="m_h" type="number"></div>' +
-        '<div><label>Цена за день, ₽</label><input id="m_d" type="number"></div>' +
-        '<div><label>Заметка</label><input id="m_t"></div>' +
-        '</div><button class="b" id="m_add">Добавить модель</button></div>';
+  // КАТАЛОГ МОДЕЛЕЙ
+  function renderModels() {
 
-    h += '<div class="card scroll"><table>' +
-        '<tr><th>Модель</th><th>За час</th><th>За день</th><th>Заметка</th><th></th></tr>';
+    var html =
+      '<div class="card"><div class="grid">' +
+      '<div><label>Модель</label><input id="m_n"></div>' +
+      '<div><label>Цена за час, ₽</label><input id="m_h" type="number" min="0" step="0.01"></div>' +
+      '<div><label>Цена за день, ₽</label><input id="m_d" type="number" min="0" step="0.01"></div>' +
+      '<div><label>Заметка</label><input id="m_t"></div>' +
+      '</div><button class="b" id="m_add">Добавить модель</button></div>';
 
-    S.models.forEach(function(m) {
-        h += '<tr><td>' + esc(m.name) +
-            '</td><td>' + money(m.hour) +
-            '</td><td>' + money(m.day) +
-            '</td><td class="mu">' + esc(m.note) +
-            '</td><td><button class="x" data-del="models:' + m.id + '">Удалить</button></td></tr>';
+    html +=
+      '<div class="card scroll"><table>' +
+      '<tr><th>Модель</th><th>За час</th><th>За день</th><th>Заметка</th><th></th></tr>';
+
+    S.models.forEach(function (model) {
+
+      html +=
+        "<tr><td>" + esc(model.name) +
+        "</td><td>" + money(model.hour) +
+        "</td><td>" + money(model.day) +
+        '</td><td class="mu">' + esc(model.note) +
+        '</td><td><button class="x" data-del="models:' +
+        model.id + '">Удалить</button></td></tr>';
+
     });
 
     if (!S.models.length) {
-        h += '<tr><td colspan="5" class="mu">Моделей пока нет</td></tr>';
+      html += '<tr><td colspan="5" class="mu">Моделей пока нет</td></tr>';
     }
 
-    return h + '</table></div>';
-}
+    return html + "</table></div>";
+  }
 
-// КЛИЕНТЫ
-function rClients() {
-    var h = '<p class="warn">Паспортные данные — это персональные данные. Не давайте доступ к странице посторонним.</p>' +
-        '<div class="card"><div class="grid">' +
-        '<div><label>ФИО</label><input id="c_n"></div>' +
-        '<div><label>Телефон</label><input id="c_p"></div>' +
-        '<div><label>Паспорт</label><input id="c_d"></div>' +
-        '</div><div class="chk"><input type="checkbox" id="c_pd"><span>Согласие на ОПД получено</span></div>' +
-        '<button class="b" id="c_add">Добавить клиента</button></div>';
+  // КЛИЕНТЫ
+  function renderClients() {
 
-    h += '<div class="card scroll"><table>' +
-        '<tr><th>ФИО</th><th>Телефон</th><th>Паспорт</th><th>Согласие ПД</th><th></th></tr>';
+    var html =
+      '<p class="warn">Паспортные данные — персональные данные. Не предоставляйте посторонним доступ к странице.</p>' +
+      '<div class="card"><div class="grid">' +
+      '<div><label>ФИО</label><input id="c_n"></div>' +
+      '<div><label>Телефон</label><input id="c_p"></div>' +
+      '<div><label>Паспорт</label><input id="c_d"></div>' +
+      '</div><div class="chk"><input type="checkbox" id="c_pd"><span>Согласие на обработку персональных данных получено</span></div>' +
+      '<button class="b" id="c_add">Добавить клиента</button></div>';
 
-    S.clients.forEach(function(c) {
-        h += '<tr><td>' + esc(c.name) +
-            '</td><td>' + esc(c.phone) +
-            '</td><td>' + esc(c.passport) +
-            '</td><td>' + (c.pd ? "да" : "нет") +
-            '</td><td><button class="x" data-del="clients:' + c.id + '">Удалить</button></td></tr>';
+    html +=
+      '<div class="card scroll"><table>' +
+      '<tr><th>ФИО</th><th>Телефон</th><th>Паспорт</th><th>Согласие ПД</th><th></th></tr>';
+
+    S.clients.forEach(function (client) {
+
+      html +=
+        "<tr><td>" + esc(client.name) +
+        "</td><td>" + esc(client.phone) +
+        "</td><td>" + esc(client.passport) +
+        "</td><td>" + (client.pd ? "да" : "нет") +
+        '</td><td><button class="x" data-del="clients:' +
+        client.id + '">Удалить</button></td></tr>';
+
     });
 
     if (!S.clients.length) {
-        h += '<tr><td colspan="5" class="mu">Клиентов пока нет</td></tr>';
+      html += '<tr><td colspan="5" class="mu">Клиентов пока нет</td></tr>';
     }
 
-    return h + '</table></div>';
-}
+    return html + "</table></div>";
+  }
 
-function opts(list, f) {
-    return list.map(function(x) {
-        return '<option value="' + esc(x.id) + '">' +
-            esc(x[f]) + '</option>';
+  // СПИСОК ВЫБОРА
+  function options(list, field) {
+
+    if (!list.length) {
+      return '<option value="">Нет записей</option>';
+    }
+
+    return list.map(function (item) {
+
+      return '<option value="' +
+        esc(item.id) +
+        '">' +
+        esc(item[field]) +
+        "</option>";
+
     }).join("");
-}
+  }
 
-// ПРОКАТЫ
-function rRentals() {
-    var h = '<div class="card"><div class="grid">' +
-        '<div><label>Клиент</label><select id="r_c">' + opts(S.clients,"name") + '</select></div>' +
-        '<div><label>Модель</label><select id="r_m">' + opts(S.models,"name") + '</select></div>' +
-        '<div><label>Дата</label><input id="r_dt" type="date" value="' + today() + '"></div>' +
-        '<div><label>Дней</label><input id="r_k" type="number" value="1"></div>' +
-        '<div><label>Сумма, ₽</label><input id="r_a" type="number"></div>' +
-        '</div><div class="chk"><input type="checkbox" id="r_i"><span>Страховка</span></div>' +
-        '<div class="chk"><input type="checkbox" id="r_f" checked><span>В доходы</span></div>' +
-        '<button class="b" id="r_add">Оформить прокат</button></div>';
+  // ПРОКАТЫ
+  function renderRentals() {
 
-    h += '<div class="card scroll"><table>' +
-        '<tr><th>Дата</th><th>Клиент</th><th>Модель</th><th>Дней</th><th>Сумма</th><th>Страховка</th><th></th></tr>';
+    var html =
+      '<div class="card"><div class="grid">' +
+      '<div><label>Клиент</label><select id="r_c">' +
+      options(S.clients, "name") + "</select></div>" +
+      '<div><label>Модель</label><select id="r_m">' +
+      options(S.models, "name") + "</select></div>" +
+      '<div><label>Дата</label><input id="r_dt" type="date" value="' +
+      today() + '"></div>' +
+      '<div><label>Дней</label><input id="r_k" type="number" min="1" step="1" value="1"></div>' +
+      '<div><label>Сумма, ₽</label><input id="r_a" type="number" min="0" step="0.01"></div>' +
+      '</div><div class="chk"><input type="checkbox" id="r_i"><span>Страховка</span></div>' +
+      '<div class="chk"><input type="checkbox" id="r_f" checked><span>Добавить сумму в доходы</span></div>' +
+      '<button class="b" id="r_add">Оформить прокат</button></div>';
 
-    S.rentals.forEach(function(r) {
-        h += '<tr><td>' + esc(r.date) +
-            '</td><td>' + esc(name(S.clients,r.client_id,"name")) +
-            '</td><td>' + esc(name(S.models,r.model_id,"name")) +
-            '</td><td>' + esc(r.days) +
-            '</td><td>' + money(r.amount) +
-            '</td><td>' + (r.insured ? "да" : "нет") +
-            '</td><td><button class="x" data-del="rentals:' + r.id + '">Удалить</button></td></tr>';
+    html +=
+      '<div class="card scroll"><table>' +
+      '<tr><th>Дата</th><th>Клиент</th><th>Модель</th><th>Дней</th><th>Сумма</th><th>Страховка</th><th></th></tr>';
+
+    S.rentals.forEach(function (rental) {
+
+      html +=
+        "<tr><td>" + esc(rental.date) +
+        "</td><td>" + esc(findName(S.clients, rental.client_id, "name")) +
+        "</td><td>" + esc(findName(S.models, rental.model_id, "name")) +
+        "</td><td>" + esc(rental.days) +
+        "</td><td>" + money(rental.amount) +
+        "</td><td>" + (rental.insured ? "да" : "нет") +
+        '</td><td><button class="x" data-del="rentals:' +
+        rental.id + '">Удалить</button></td></tr>';
+
     });
 
     if (!S.rentals.length) {
-        h += '<tr><td colspan="7" class="mu">Прокатов пока нет</td></tr>';
+      html += '<tr><td colspan="7" class="mu">Прокатов пока нет</td></tr>';
     }
 
-    return h + '</table></div>';
-}
+    return html + "</table></div>";
+  }
 
-// ФИНАНСЫ
-function rFin() {
-    var inc = 0;
-    var out = 0;
+  // ФИНАНСЫ
+  function renderFinance() {
 
-    S.fin.forEach(function(f) {
-        if (f.type === "in") inc += Number(f.amount);
-        else out += Number(f.amount);
+    var income = 0;
+    var expenses = 0;
+
+    S.fin.forEach(function (item) {
+
+      if (item.type === "in") {
+        income += Number(item.amount || 0);
+      } else {
+        expenses += Number(item.amount || 0);
+      }
+
     });
 
-    var h = '<div class="sum">' +
-        '<div><label>Доходы</label><b class="in">' + money(inc) + '</b></div>' +
-        '<div><label>Расходы</label><b class="out">' + money(out) + '</b></div>' +
-        '<div><label>Касса</label><b>' + money(inc-out) + '</b></div></div>';
+    var html =
+      '<div class="sum">' +
+      '<div><label>Доходы</label><b class="in">' + money(income) + "</b></div>" +
+      '<div><label>Расходы</label><b class="out">' + money(expenses) + "</b></div>" +
+      '<div><label>Касса</label><b>' + money(income - expenses) + "</b></div></div>";
 
-    h += '<div class="card"><div class="grid">' +
-        '<div><label>Тип</label><select id="f_t"><option value="in">Доход</option><option value="out">Расход</option></select></div>' +
-        '<div><label>Сумма, ₽</label><input id="f_a" type="number"></div>' +
-        '<div><label>Статья / Комментарий</label><input id="f_m"></div>' +
-        '<div><label>Дата</label><input id="f_d" type="date" value="' + today() + '"></div>' +
-        '</div><button class="b" id="f_add">Добавить операцию</button></div>';
+    html +=
+      '<div class="card"><div class="grid">' +
+      '<div><label>Тип</label><select id="f_t"><option value="in">Доход</option><option value="out">Расход</option></select></div>' +
+      '<div><label>Сумма, ₽</label><input id="f_a" type="number" min="0" step="0.01"></div>' +
+      '<div><label>Статья / комментарий</label><input id="f_m"></div>' +
+      '<div><label>Дата</label><input id="f_d" type="date" value="' + today() + '"></div>' +
+      '</div><button class="b" id="f_add">Добавить операцию</button></div>';
 
-    h += '<div class="card scroll"><table>' +
-        '<tr><th>Дата</th><th>Тип</th><th>Сумма</th><th>Описание</th><th></th></tr>';
+    html +=
+      '<div class="card scroll"><table>' +
+      '<tr><th>Дата</th><th>Тип</th><th>Сумма</th><th>Описание</th><th></th></tr>';
 
-    S.fin.forEach(function(f) {
-        h += '<tr><td>' + esc(f.date) +
-            '</td><td class="' + f.type + '">' + (f.type === "in" ? "Доход" : "Расход") +
-            '</td><td>' + money(f.amount) +
-            '</td><td class="mu">' + esc(f.note) +
-            '</td><td><button class="x" data-del="fin:' + f.id + '">Удалить</button></td></tr>';
+    S.fin.forEach(function (item) {
+
+      html +=
+        "<tr><td>" + esc(item.date) +
+        '</td><td class="' + esc(item.type) + '">' +
+        (item.type === "in" ? "Доход" : "Расход") +
+        "</td><td>" + money(item.amount) +
+        '</td><td class="mu">' + esc(item.note) +
+        '</td><td><button class="x" data-del="fin:' +
+        item.id + '">Удалить</button></td></tr>';
+
     });
 
     if (!S.fin.length) {
-        h += '<tr><td colspan="5" class="mu">Операций пока нет</td></tr>';
+      html += '<tr><td colspan="5" class="mu">Операций пока нет</td></tr>';
     }
 
-    return h + '</table></div>';
-}
+    return html + "</table></div>";
+  }
 
-// ОБРАБОТЧИКИ
-async function bind() {
-    if ($("m_add")) $("m_add").onclick = async function() {
+  // СОСТОЯНИЕ КНОПОК
+  function setButtonBusy(button, busy, text) {
 
-    var n = v("m_n");
-    var h = v("m_h");
-    var d = v("m_d");
-    var t = v("m_t");
+    if (!button) return;
 
-    if (!n) {
-        alert("Введите название модели");
-        return;
+    button.disabled = busy;
+
+    if (busy) {
+
+      button.dataset.originalText = button.textContent;
+      button.textContent = text || "Сохранение...";
+
+    } else if (button.dataset.originalText) {
+
+      button.textContent = button.dataset.originalText;
+      delete button.dataset.originalText;
+
     }
+  }
 
-    var res = await clientDB
-        .from("models")
-        .insert([{
-            name: n,
-            hour: h === "" ? null : Number(h),
-            day: d === "" ? null : Number(d),
-            note: t
-        }]);
+  // ДОБАВЛЕНИЕ И УДАЛЕНИЕ
+  async function bind() {
 
-    if (res.error) {
-        alert("Ошибка добавления: " + res.error.message);
-        return;
-    }
+    // ДОБАВИТЬ МОДЕЛЬ
+    var addModel = $("m_add");
 
-    alert("Модель успешно добавлена!");
+    if (addModel) {
+      addModel.onclick = async function () {
 
-    loadData();
-};
-    };
+        setButtonBusy(addModel, true);
 
-    if ($("r_add")) $("r_add").onclick = async function() {
-        var c = v("r_c"), m = v("r_m"), dt = v("r_dt"),
-            k = v("r_k"), a = v("r_a"),
-            ins = $("r_i").checked, f = $("r_f").checked;
+        try {
 
-        if (!c || !m) return;
+          var modelName = value("m_n");
 
-        var res = await clientDB.from("rentals").insert([{
-            client_id:c,
-            model_id:m,
-            date:dt,
-            days:k,
-            amount:a,
-            insured:ins
-        }]);
+          if (!modelName) {
+            throw new Error("Введи название модели.");
+          }
 
-        if (res.error) return alert(res.error.message);
+          var hour = numberOrNull(value("m_h"), "Цена за час");
+          var day = numberOrNull(value("m_d"), "Цена за день");
 
-        if (f) {
-            var finRes = await clientDB.from("fin").insert([{
-                type:"in",
-                amount:a,
-                note:"Прокат: " + name(S.models,m,"name") +
-                    " (" + name(S.clients,c,"name") + ")",
-                date:dt
+          if (hour !== null && hour < 0) {
+            throw new Error("Цена за час не может быть отрицательной.");
+          }
+
+          if (day !== null && day < 0) {
+            throw new Error("Цена за день не может быть отрицательной.");
+          }
+
+          var result = await clientDB
+            .from("models")
+            .insert([{
+              name: modelName,
+              hour: hour,
+              day: day,
+              note: value("m_t")
             }]);
 
-            if (finRes.error) return alert(finRes.error.message);
+          if (result.error) throw result.error;
+
+          alert("Модель добавлена.");
+
+          await loadData();
+
+        } catch (error) {
+
+          showDbError("Не удалось добавить модель", error);
+
+        } finally {
+
+          setButtonBusy(addModel, false);
+
         }
+      };
+    }
 
-        loadData();
-    };
+    // ДОБАВИТЬ КЛИЕНТА
+    var addClient = $("c_add");
 
-    if ($("f_add")) $("f_add").onclick = async function() {
-        var t = v("f_t"), a = v("f_a"), m = v("f_m"), d = v("f_d");
-        if (!a) return;
+    if (addClient) {
+      addClient.onclick = async function () {
 
-        var res = await clientDB.from("fin").insert([{
-            type:t,
-            amount:a,
-            note:m,
-            date:d
-        }]);
+        setButtonBusy(addClient, true);
 
-        if (res.error) return alert(res.error.message);
-        loadData();
-    };
+        try {
 
-    // ИСПРАВЛЕННОЕ УДАЛЕНИЕ
+          var clientName = value("c_n");
+
+          if (!clientName) {
+            throw new Error("Введи ФИО клиента.");
+          }
+
+          var result = await clientDB
+            .from("clients")
+            .insert([{
+              name: clientName,
+              phone: value("c_p") || null,
+              passport: value("c_d") || null,
+              pd: $("c_pd").checked
+            }]);
+
+          if (result.error) throw result.error;
+
+          alert("Клиент добавлен.");
+
+          await loadData();
+
+        } catch (error) {
+
+          showDbError("Не удалось добавить клиента", error);
+
+        } finally {
+
+          setButtonBusy(addClient, false);
+
+        }
+      };
+    }
+
+    // ОФОРМИТЬ ПРОКАТ
+    var addRental = $("r_add");
+
+    if (addRental) {
+      addRental.onclick = async function () {
+
+        setButtonBusy(addRental, true);
+
+        try {
+
+          var clientId = value("r_c");
+          var modelId = value("r_m");
+          var date = value("r_dt");
+
+          if (!clientId || !modelId) {
+            throw new Error("Сначала добавь клиента и модель.");
+          }
+
+          if (!date) {
+            throw new Error("Укажи дату проката.");
+          }
+
+          var days = requiredNumber(value("r_k"), "Дней", 1);
+
+          if (!Number.isInteger(days)) {
+            throw new Error("Количество дней должно быть целым числом.");
+          }
+
+          var amount = requiredNumber(value("r_a"), "Сумма", 0);
+
+          var insured = $("r_i").checked;
+          var addToIncome = $("r_f").checked;
+
+          var rentalResult = await clientDB
+            .from("rentals")
+            .insert([{
+              client_id: Number(clientId),
+              model_id: Number(modelId),
+              date: date,
+              days: days,
+              amount: amount,
+              insured: insured
+            }]);
+
+          if (rentalResult.error) throw rentalResult.error;
+
+          if (addToIncome) {
+
+            var financeResult = await clientDB
+              .from("fin")
+              .insert([{
+                type: "in",
+                amount: amount,
+                note: "Прокат: " +
+                  findName(S.models, modelId, "name") +
+                  " (" +
+                  findName(S.clients, clientId, "name") +
+                  ")",
+                date: date
+              }]);
+
+            if (financeResult.error) {
+
+              throw new Error(
+                "Прокат записан, но не удалось добавить доход в финансы: " +
+                financeResult.error.message
+              );
+
+            }
+          }
+
+          alert("Прокат оформлен.");
+
+          await loadData();
+
+        } catch (error) {
+
+          showDbError("Не удалось оформить прокат", error);
+
+        } finally {
+
+          setButtonBusy(addRental, false);
+
+        }
+      };
+    }
+
+    // ДОБАВИТЬ ФИНАНСОВУЮ ОПЕРАЦИЮ
+    var addFinance = $("f_add");
+
+    if (addFinance) {
+      addFinance.onclick = async function () {
+
+        setButtonBusy(addFinance, true);
+
+        try {
+
+          var amount = requiredNumber(value("f_a"), "Сумма", 0);
+          var date = value("f_d");
+
+          if (!date) {
+            throw new Error("Укажи дату операции.");
+          }
+
+          var result = await clientDB
+            .from("fin")
+            .insert([{
+              type: value("f_t"),
+              amount: amount,
+              note: value("f_m") || null,
+              date: date
+            }]);
+
+          if (result.error) throw result.error;
+
+          alert("Операция добавлена.");
+
+          await loadData();
+
+        } catch (error) {
+
+          showDbError("Не удалось добавить операцию", error);
+
+        } finally {
+
+          setButtonBusy(addFinance, false);
+
+        }
+      };
+    }
+
+    // УДАЛЕНИЕ ЗАПИСЕЙ
     Array.prototype.forEach.call(
-        document.querySelectorAll("[data-del]"),
-        function(b) {
-            b.onclick = async function() {
-                if (!confirm("Удалить запись безвозвратно?")) return;
+      document.querySelectorAll("[data-del]"),
+      function (button) {
 
-                var p = b.dataset.del.split(":");
+        button.onclick = async function () {
 
-                var res = await clientDB
-                    .from(p[0])
-                    .delete()
-                    .eq("id", Number(p[1]));
+          if (!confirm("Удалить запись безвозвратно?")) {
+            return;
+          }
 
-                if (res.error) return alert(res.error.message);
+          var parts = String(button.dataset.del || "").split(":");
 
-                loadData();
-            };
-        }
+          var table = parts[0];
+          var id = Number(parts[1]);
+
+          var allowedTables = [
+            "models",
+            "clients",
+            "rentals",
+            "fin"
+          ];
+
+          if (
+            allowedTables.indexOf(table) === -1 ||
+            !Number.isInteger(id) ||
+            id <= 0
+          ) {
+            alert("Некорректные данные для удаления.");
+            return;
+          }
+
+          setButtonBusy(button, true, "Удаление...");
+
+          try {
+
+            var result = await clientDB
+              .from(table)
+              .delete()
+              .eq("id", id);
+
+            if (result.error) throw result.error;
+
+            await loadData();
+
+          } catch (error) {
+
+            showDbError("Не удалось удалить запись", error);
+
+          } finally {
+
+            setButtonBusy(button, false);
+
+          }
+        };
+      }
     );
-}
+  }
 
-// ЗАПУСК ПРИЛОЖЕНИЯ
-async function init() {
+  // ЗАПУСК
+  async function init() {
+
     try {
 
-        $("status").textContent = "Подключение к базе...";
+      setStatus("Подключаю Supabase...");
 
-        if (URL_DB.indexOf("YOUR_PROJECT_ID") !== -1) {
-            throw new Error("Укажи настоящий Project URL Supabase в URL_DB");
-        }
+      if (!URL_DB || !KEY_DB) {
+        throw new Error("Не указаны URL или Publishable key Supabase.");
+      }
 
-        await loadSupabaseLibrary();
+      await loadSupabaseLibrary();
 
-        clientDB = window.supabase.createClient(URL_DB, KEY_DB);
+      clientDB = window.supabase.createClient(URL_DB, KEY_DB);
 
-        await loadData();
+      await loadData();
 
-        subscribeRealtime();
+      subscribeRealtime();
 
-    } catch(e) {
+    } catch (error) {
 
-        console.error("Ошибка запуска:", e);
+      console.error("Ошибка запуска приложения:", error);
 
-        $("status").textContent = "Ошибка запуска: " + e.message;
+      setStatus("Ошибка запуска: " + (error.message || error));
 
     }
-}
+  }
 
-if (
-    document.readyState === "complete" ||
-    document.readyState === "interactive"
-) {
+  // ЗАПУСК ПОСЛЕ ЗАГРУЗКИ СТРАНИЦЫ
+  if (document.readyState === "loading") {
+
+    document.addEventListener(
+      "DOMContentLoaded",
+      init,
+      { once: true }
+    );
+
+  } else {
+
     init();
-} else {
-    document.addEventListener("DOMContentLoaded", init, {once:true});
-}
+
+  }
 
 })();
 </script>    
